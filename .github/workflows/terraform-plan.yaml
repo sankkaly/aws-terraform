@@ -1,0 +1,103 @@
+name: "Terraform Multi-Env CI/CD"
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - dev
+  
+  pull-request:
+    branches:
+      - main
+      - test
+      - dev
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_KEY_ID}}
+  AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY}}
+  TF_LOG: INFO
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  terraform-plan:
+    name: "Terraform-plan"
+    runs-on: ubuntu-latest
+    outputs:
+      tf_workspace: ${{ steps.env_vars.outputs.tf_workspace}}
+    defaults:
+      run:
+        shell: bash
+  
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with: 
+          terraform_version: 1.13.3
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: v0.52.0
+      
+      - name: Init TFlint
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: tflint -f compact
+
+      - name: Run Trivy vulnerability scanner in IaC mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          hide-process: false
+          format: "table"
+          exit-code: "0"
+          ignored-unfixed: true
+          severity: "CRITICAL,HIGH"
+      
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Set Environment variables
+        id: env-vars
+        run: |
+          if [[ "${{ github.event_name }}" == "pull-request"]]; then
+            BRANCH_NAME="${{ github.base_ref }}"
+          else
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+
+          if [[ "BRANCH_NAME" == "main"]]; then
+            echo "WORKSPACE_NAME=prod" >> $GITHUB_ENV
+            echo "tf_workspace=prod" >> $GITHUB_OUTPUT
+            echo "TF_VAR_FILE=prod.tfvars"  >> $GITHUB_ENV
+          elif [[ "BRANCH_NAME" == test ]]; then
+            echo "WORKSPACE_NAME=test" >> $GITHUB_ENV
+            echo "tf_workspace=test" >> $GITHUB_OUTPUT
+            echo "TF_VAR_FILE=test.tfvars"  >> $GITHUB_ENV
+          else
+            echo "WORKSPACE_NAME=dev" >> $GITHUB_ENV
+            echo "tf_workspace=dev" >> $GITHUB_OUTPUT
+            echo "TF_VAR_FILE=dev.tfvars"  >> $GITHUB_ENV
+          fi
+      
+      - name: Select Terrafor Workspace
+        run: |
+          terraform workspace select $WORKSPACE_NAME || terraform workspace new $WORKSPACE_NAME
