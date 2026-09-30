@@ -135,18 +135,11 @@ jobs:
       # ------------------------------------------------------
       # Configure AWS using OIDC
       # ------------------------------------------------------
-      - name: Echo ARN Details
-        env:
-          ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-        run: |
-          echo "ARN is set: $([ -n "$ROLE_ARN" ] && echo yes || echo no)"
-          echo "Account ID: $(echo "$ROLE_ARN" | cut -d: -f5)"
-          echo "Role: $(echo "$ROLE_ARN" | sed 's#^arn:aws:iam::[0-9]*:role/##')"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::344367180490:role/actions-terraform-role
           aws-region: ${{ env.AWS_REGION }}
 
 
