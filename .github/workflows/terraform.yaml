@@ -142,6 +142,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Echo ARN
+        env:
+          ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: echo "$ROLE_ARN"
+
 
       # ------------------------------------------------------
       # Terraform Init
