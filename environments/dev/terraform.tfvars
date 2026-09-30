@@ -20,7 +20,7 @@ private_subnet_cidrs = [
 ]
 
 tags = {
-  Project   = "terraform-vpc"
-  ManagedBy = "Terraform"
+  Project     = "terraform-vpc"
+  ManagedBy   = "Terraform"
   Environment = "dev"
 }

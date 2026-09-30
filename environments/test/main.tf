@@ -9,10 +9,10 @@ terraform {
   }
 
   backend "s3" {
-  bucket = "aws-terraform-state-2026"
-  key    = "test/terraform.tfstate"
-  region = "ap-south-1"
-}
+    bucket = "aws-terraform-state-2026"
+    key    = "test/terraform.tfstate"
+    region = "ap-south-1"
+  }
 }
 
 provider "aws" {
