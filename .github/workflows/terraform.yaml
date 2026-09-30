@@ -1,0 +1,395 @@
+name: Terraform Multi-Environment CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - dev
+
+  pull_request:
+    branches:
+      - main
+      - test
+      - dev
+
+
+# ==========================================================
+# GLOBAL ENVIRONMENT VARIABLES
+# ==========================================================
+
+env:
+  AWS_REGION: ap-south-1
+  TF_LOG: INFO
+
+
+# ==========================================================
+# GITHUB PERMISSIONS
+# ==========================================================
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+
+# ==========================================================
+# TERRAFORM PLAN
+# ==========================================================
+
+jobs:
+
+  terraform-plan:
+
+    name: Terraform Plan
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      environment: ${{ steps.env_vars.outputs.environment }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      # ------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # ------------------------------------------------------
+      # Determine Environment
+      # ------------------------------------------------------
+
+      - name: Determine Environment
+        id: env_vars
+        run: |
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+
+            BRANCH_NAME="${{ github.base_ref }}"
+
+          else
+
+            BRANCH_NAME="${{ github.ref_name }}"
+
+          fi
+
+
+          echo "Branch: $BRANCH_NAME"
+
+
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+
+            ENVIRONMENT="prod"
+
+          elif [[ "$BRANCH_NAME" == "test" ]]; then
+
+            ENVIRONMENT="test"
+
+          elif [[ "$BRANCH_NAME" == "dev" ]]; then
+
+            ENVIRONMENT="dev"
+
+          else
+
+            echo "Unsupported branch: $BRANCH_NAME"
+            exit 1
+
+          fi
+
+
+          echo "Environment: $ENVIRONMENT"
+
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+
+
+      # ------------------------------------------------------
+      # Setup Terraform
+      # ------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+
+
+      # ------------------------------------------------------
+      # Setup TFLint
+      # ------------------------------------------------------
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: v0.52.0
+
+
+      # ------------------------------------------------------
+      # Configure AWS using OIDC
+      # ------------------------------------------------------
+
+      - name: Show OIDC sub
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            core.info(`sub = ${payload.sub}`);
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+
+
+      # ------------------------------------------------------
+      # Terraform Init
+      # ------------------------------------------------------
+
+      - name: Terraform Init
+        id: init
+        working-directory: environments/${{ steps.env_vars.outputs.environment }}
+        run: terraform init
+
+
+      # ------------------------------------------------------
+      # Terraform Format
+      # ------------------------------------------------------
+
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -recursive
+
+
+      # ------------------------------------------------------
+      # Terraform Validate
+      # ------------------------------------------------------
+
+      - name: Terraform Validate
+        id: validate
+        working-directory: environments/${{ steps.env_vars.outputs.environment }}
+        run: terraform validate
+
+
+      # ------------------------------------------------------
+      # Initialize TFLint
+      # ------------------------------------------------------
+
+      - name: Initialize TFLint
+        working-directory: environments/${{ steps.env_vars.outputs.environment }}
+        run: tflint --init
+
+
+      # ------------------------------------------------------
+      # Run TFLint
+      # ------------------------------------------------------
+
+      - name: Run TFLint
+        working-directory: environments/${{ steps.env_vars.outputs.environment }}
+        run: tflint
+
+
+      # ------------------------------------------------------
+      # Trivy IaC Security Scan
+      # ------------------------------------------------------
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          hide-progress: false
+          format: table
+          exit-code: 0
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+
+      # ------------------------------------------------------
+      # Terraform Plan
+      # ------------------------------------------------------
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: environments/${{ steps.env_vars.outputs.environment }}
+        run: |
+          terraform plan \
+            -var-file="terraform.tfvars" \
+            -no-color \
+            -input=false \
+            -out=tfplan
+
+        continue-on-error: true
+
+
+      # ------------------------------------------------------
+      # Comment Terraform Plan on PR
+      # ------------------------------------------------------
+
+      - name: Update Pull Request
+        uses: actions/github-script@v7
+
+        if: github.event_name == 'pull_request'
+
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+
+        with:
+
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+          script: |
+
+            const output = `
+            ## Terraform Plan
+
+            **Environment:** \`${{ steps.env_vars.outputs.environment }}\`
+
+            | Step | Result |
+            |------|--------|
+            | Terraform Format | ${{ steps.fmt.outcome }} |
+            | Terraform Init | ${{ steps.init.outcome }} |
+            | Terraform Validate | ${{ steps.validate.outcome }} |
+            | Terraform Plan | ${{ steps.plan.outcome }} |
+
+            <details>
+            <summary>Show Terraform Plan</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            **Triggered by:** @${{ github.actor }}
+
+            **Event:** \`${{ github.event_name }}\`
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+
+      # ------------------------------------------------------
+      # Fail Pipeline if Terraform Plan Failed
+      # ------------------------------------------------------
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+
+      # ------------------------------------------------------
+      # Upload Terraform Plan
+      # ------------------------------------------------------
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ steps.env_vars.outputs.environment }}
+          path: environments/${{ steps.env_vars.outputs.environment }}/tfplan
+
+
+# ==========================================================
+# TERRAFORM APPLY
+# ==========================================================
+
+  terraform-apply:
+
+    name: Terraform Apply
+
+    needs: terraform-plan
+
+    # Apply only after a push.
+    # Pull requests only run PLAN.
+    if: github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    # GitHub Environment:
+    #
+    # dev  -> dev
+    # test -> test
+    # main -> prod
+    #
+    environment:
+      name: ${{ needs.terraform-plan.outputs.environment }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      # ------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # ------------------------------------------------------
+      # Setup Terraform
+      # ------------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+
+
+      # ------------------------------------------------------
+      # Configure AWS using OIDC
+      # ------------------------------------------------------
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # ------------------------------------------------------
+      # Terraform Init
+      # ------------------------------------------------------
+
+      - name: Terraform Init
+        working-directory: environments/${{ needs.terraform-plan.outputs.environment }}
+        run: terraform init
+
+
+      # ------------------------------------------------------
+      # Download Terraform Plan
+      # ------------------------------------------------------
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.terraform-plan.outputs.environment }}
+          path: environments/${{ needs.terraform-plan.outputs.environment }}
+
+
+      # ------------------------------------------------------
+      # Terraform Apply
+      # ------------------------------------------------------
+
+      - name: Terraform Apply
+        working-directory: environments/${{ needs.terraform-plan.outputs.environment }}
+        run: |
+          terraform apply \
+            -auto-approve \
+            -input=false \
+            tfplan
