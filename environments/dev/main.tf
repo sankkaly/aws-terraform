@@ -7,6 +7,12 @@ terraform {
       version = "~> 6.0"
     }
   }
+
+  backend "s3" {
+  bucket = "sanket-terraform-state-2026"
+  key    = "dev/terraform.tfstate"
+  region = "ap-south-1"
+}
 }
 
 provider "aws" {
