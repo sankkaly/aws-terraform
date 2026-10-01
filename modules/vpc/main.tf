@@ -55,35 +55,35 @@ resource "aws_subnet" "private" {
   )
 }
 
-resource "aws_eip" "nat" {
-  count  = length(var.public_subnet_cidrs)
-  domain = "vpc"
+# resource "aws_eip" "nat" {
+#   count  = length(var.public_subnet_cidrs)
+#   domain = "vpc"
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.environment}-nat-eip-${count.index + 1}"
-    }
-  )
+#   tags = merge(
+#     var.tags,
+#     {
+#       Name = "${var.environment}-nat-eip-${count.index + 1}"
+#     }
+#   )
 
-  depends_on = [aws_internet_gateway.this]
-}
+#   depends_on = [aws_internet_gateway.this]
+# }
 
-resource "aws_nat_gateway" "this" {
-  count = length(var.public_subnet_cidrs)
+# resource "aws_nat_gateway" "this" {
+#   count = length(var.public_subnet_cidrs)
 
-  allocation_id = aws_eip.nat[count.index].id
-  subnet_id     = aws_subnet.public[count.index].id
+#   allocation_id = aws_eip.nat[count.index].id
+#   subnet_id     = aws_subnet.public[count.index].id
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.environment}-nat-${count.index + 1}"
-    }
-  )
+#   tags = merge(
+#     var.tags,
+#     {
+#       Name = "${var.environment}-nat-${count.index + 1}"
+#     }
+#   )
 
-  depends_on = [aws_internet_gateway.this]
-}
+#   depends_on = [aws_internet_gateway.this]
+# }
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
