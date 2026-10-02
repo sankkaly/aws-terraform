@@ -28,3 +28,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_nat" {
+  description = "toggle for nat-gateway"
+  type = bool
+  default = false
+}
+
+variable "enable_eip" {
+  description = "toggle for eip"
+  type = bool
+  default = false
+}
