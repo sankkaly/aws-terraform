@@ -24,3 +24,5 @@ tags = {
   ManagedBy   = "Terraform"
   Environment = "dev"
 }
+
+nat_gateway_strategy = "none"

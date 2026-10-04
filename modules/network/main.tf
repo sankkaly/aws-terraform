@@ -56,7 +56,7 @@ resource "aws_subnet" "private" {
 }
 
 resource "aws_eip" "nat" {
-  count  = var.enable_eip ? length(var.public_subnet_cidrs) : 0
+  count  = local.nat_count
   domain = "vpc"
 
   tags = merge(
@@ -70,7 +70,7 @@ resource "aws_eip" "nat" {
 }
 
 resource "aws_nat_gateway" "this" {
-  count = length(var.public_subnet_cidrs)
+  count = local.nat_count
 
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
@@ -85,7 +85,6 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
 }
 
-
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
 
@@ -98,19 +97,19 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table_association" "public" {
-  count = length(aws_subnet.public)
+  count          = length(aws_subnet.public)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
-resource "aws-route" "public_internet" {
-  route_table_id = aws_route_table.public.id
-  destination_cidr_block  = "0.0.0.0/0"
-  gateway_id = internet_gateway_id
+resource "aws_route" "public_internet" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.this.id
 }
 
 resource "aws_route_table" "private" {
-  count = length(var.private_subnet_cidrs)
+  count  = length(var.private_subnet_cidrs)
   vpc_id = aws_vpc.this.id
   tags = merge(
     var.tags,
@@ -121,13 +120,21 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table_association" "private" {
-  count = length(aws_subnet.private)
+  count          = length(var.private_subnet_cidrs)
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
 }
 
 resource "aws_route" "private" {
-  route_table_id = aws_route_table.private.id
-  
-  
+  count                  = local.nat_count > 0 ? length(var.private_subnet_cidrs) : 0
+  route_table_id         = aws_route_table.private[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.this[var.nat_gateway_strategy == "per_az" ? count.index : 0].id
+
+  lifecycle {
+    precondition {
+      condition     = var.nat_gateway_strategy != "per_az" || length(var.private_subnet_cidrs) <= length(var.public_subnet_cidrs)
+      error_message = "per_az requires at least as many public subnets as private subnets."
+    }
+  }
 }

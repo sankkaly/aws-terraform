@@ -29,14 +29,15 @@ variable "tags" {
   default     = {}
 }
 
-variable "enable_nat" {
-  description = "toggle for nat-gateway"
-  type = bool
-  default = false
+variable "nat_gateway_strategy" {
+  type        = string
+  description = "Single Nat Gateway for dev and test environment select SINGLE OR PER_AZ FOR PROD OR NONE TO DISABLE"
+  default     = "single"
+
+  validation {
+    condition     = contains(["none", "single", "per_az"], var.nat_gateway_strategy)
+    error_message = "select any one"
+  }
 }
 
-variable "enable_eip" {
-  description = "toggle for eip"
-  type = bool
-  default = false
-}
+

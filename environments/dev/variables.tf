@@ -32,3 +32,14 @@ variable "tags" {
   type        = map(string)
   description = "Common resource tags"
 }
+
+variable "nat_gateway_strategy" {
+  type        = string
+  description = "Single Nat Gateway for dev and test environment select SINGLE OR PER_AZ FOR PROD OR NONE TO DISABLE"
+  default     = "single"
+
+  validation {
+    condition     = contains(["none", "single", "per_az"], var.nat_gateway_strategy)
+    error_message = "select any one"
+  }
+}

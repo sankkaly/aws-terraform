@@ -24,3 +24,5 @@ tags = {
   ManagedBy   = "Terraform"
   Environment = "prod"
 }
+
+nat_gateway_strategy = "per_az"
